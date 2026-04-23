@@ -12,10 +12,6 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0e141b"
-      },
       "package": "com.flighttracker.app",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
@@ -28,6 +24,11 @@
     },
     "plugins": [
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2847344e-3e74-4c4a-b1d7-bcbb66345f61"
+      }
+    }
   }
 }
