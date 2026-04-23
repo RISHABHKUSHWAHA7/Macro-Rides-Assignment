@@ -1,0 +1,9 @@
+{
+  "name": "macro-rides-flight-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time flight tracker with Node.js backend and React Native app",
+  "scripts": {
+    "start": "./start.sh"
+  }
+}
