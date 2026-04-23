@@ -32,7 +32,14 @@ export const config = {
   openSkyUrl:
     process.env.OPENSKY_URL ||
     "https://opensky-network.org/api/states/all?lamin=8.0&lomin=68.0&lamax=37.0&lomax=97.0",
+  // Optional proxy URL. When set, requests are routed as:
+  //   <OPENSKY_PROXY_URL><openSkyUrl>
+  // e.g. OPENSKY_PROXY_URL=https://my-proxy.example.com/fetch?url=
+  openSkyProxyUrl: process.env.OPENSKY_PROXY_URL || "",
   openSkyUsername: process.env.OPENSKY_USERNAME || "",
   openSkyPassword: process.env.OPENSKY_PASSWORD || "",
   enableMockOnApiFailure: process.env.ENABLE_MOCK_ON_API_FAILURE !== "false",
+  // Retry settings for the OpenSky fetch
+  fetchMaxRetries: Number(process.env.FETCH_MAX_RETRIES || 3),
+  fetchRetryBaseDelayMs: Number(process.env.FETCH_RETRY_BASE_DELAY_MS || 1000),
 };
