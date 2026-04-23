@@ -10,8 +10,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const server = app.listen(config.port, () => {
-  console.log(`Backend listening on http://localhost:${config.port}`);
+const server = app.listen(config.port, "0.0.0.0", () => {
+  console.log(`Backend listening on port ${config.port}`);
+  console.log(`Environment: PORT=${process.env.PORT}, RAILWAY_PORT=${process.env.RAILWAY_PORT}`);
 });
 
 const wss = new WebSocketServer({ server });

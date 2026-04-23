@@ -3,7 +3,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export const config = {
-  port: Number(process.env.PORT || 8080),
+  // Railway uses PORT, fallback to 8080 for local dev
+  port: parseInt(process.env.PORT || process.env.RAILWAY_PORT || "8080", 10),
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 10000),
   openSkyUrl:
     process.env.OPENSKY_URL ||
