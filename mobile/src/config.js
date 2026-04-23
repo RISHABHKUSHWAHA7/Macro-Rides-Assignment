@@ -1,4 +1,4 @@
-export const WS_URL = "ws://10.181.181.24:8080";
+export const WS_URL = "wss://macro-rides-assignment-production.up.railway.app";
 
 export const INITIAL_REGION = {
   latitude: 22.9734,
