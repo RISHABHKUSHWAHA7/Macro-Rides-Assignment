@@ -4,6 +4,6 @@
   "private": true,
   "description": "Real-time flight tracker with Node.js backend and React Native app",
   "scripts": {
-    "start": "./start.sh"
+    "start": "sh start.sh"
   }
 }
