@@ -2,6 +2,10 @@
 
 This is a simple flight tracker I built with a Node.js backend and an Expo React Native app. The backend talks to OpenSky, filters the active flights over India, and sends updates to the mobile app over WebSocket. The app itself never calls OpenSky directly.
 
+## Deployment
+
+- The backend is deployed on Railway.
+
 ## What I Built
 
 - A backend that polls OpenSky on a timer, filters the results, and broadcasts the current flight data.
@@ -66,6 +70,12 @@ Commands:
 cd mobile
 npm install
 npm run start
+```
+
+You can also start the mobile app directly from the project root:
+
+```bash
+npm --prefix mobile start
 ```
 
 Before launching on a device or emulator, set the WebSocket URL in `mobile/src/config.js`:

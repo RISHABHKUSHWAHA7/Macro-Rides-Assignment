@@ -1,5 +1,10 @@
 # Flight Tracker Mobile
 
+## Deployment Note
+
+- The backend is deployed on Railway.
+- Set `src/config.js` to your Railway WebSocket URL when using deployed backend data.
+
 ## Run
 
 1. Install dependencies:
@@ -14,6 +19,10 @@
 3. Start Expo:
 
    npm run start
+
+   Or from the project root:
+
+   npm --prefix mobile start
 
 4. Open on emulator/device.
 
