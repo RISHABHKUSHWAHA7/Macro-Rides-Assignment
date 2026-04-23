@@ -97,11 +97,137 @@ wss.on("connection", (socket) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a fetch/network error into a human-readable category so logs are
+ * immediately actionable without having to decode raw error messages.
+ */
+const classifyFetchError = (error) => {
+  const msg = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : "";
+
+  if (name === "TimeoutError" || msg.includes("TimeoutError")) {
+    return { kind: "timeout", label: "REQUEST TIMEOUT" };
+  }
+  if (
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("Connect Timeout") ||
+    msg.includes("connect timeout")
+  ) {
+    return { kind: "timeout", label: "CONNECTION TIMEOUT" };
+  }
+  if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
+    return { kind: "dns", label: "DNS RESOLUTION FAILURE" };
+  }
+  if (msg.includes("ECONNREFUSED")) {
+    return { kind: "refused", label: "CONNECTION REFUSED" };
+  }
+  if (msg.includes("ECONNRESET") || msg.includes("socket hang up")) {
+    return { kind: "reset", label: "CONNECTION RESET" };
+  }
+  if (msg.includes("401") || msg.includes("403")) {
+    return { kind: "auth", label: "AUTHENTICATION / AUTHORISATION ERROR" };
+  }
+  if (msg.includes("429")) {
+    return { kind: "ratelimit", label: "RATE LIMITED (429)" };
+  }
+  if (msg.includes("5")) {
+    return { kind: "server", label: "REMOTE SERVER ERROR (5xx)" };
+  }
+  return { kind: "unknown", label: "UNKNOWN FETCH ERROR" };
+};
+
+/**
+ * Sleep for `ms` milliseconds.
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Fetch the OpenSky API with automatic retry and exponential backoff.
+ *
+ * Attempts up to `config.fetchMaxRetries` times (default 3).
+ * Delay between attempts: baseDelay * 2^attempt  (1 s, 2 s, 4 s by default).
+ *
+ * Throws the last error if all attempts are exhausted.
+ */
+const fetchWithRetry = async (url, fetchOptions) => {
+  const maxRetries = config.fetchMaxRetries;
+  const baseDelay = config.fetchRetryBaseDelayMs;
+  let lastError;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = baseDelay * Math.pow(2, attempt - 1); // 1s, 2s, 4s …
+      console.log(
+        `[POLL] Retry ${attempt}/${maxRetries - 1} — waiting ${delay}ms before next attempt...`,
+      );
+      await sleep(delay);
+    }
+
+    try {
+      console.log(
+        `[POLL] Fetch attempt ${attempt + 1}/${maxRetries} → ${url}`,
+      );
+      // Each attempt gets its own fresh AbortSignal so the timeout resets.
+      const signal = AbortSignal.timeout(config.fetchTimeoutMs);
+      const response = await fetch(url, { ...fetchOptions, signal });
+
+      console.log(
+        `[POLL] Attempt ${attempt + 1} — HTTP ${response.status} ${response.statusText}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(`OpenSky API responded with HTTP ${response.status}`);
+      }
+
+      return response; // success — return immediately
+    } catch (err) {
+      lastError = err;
+      const { kind, label } = classifyFetchError(err);
+
+      console.error(
+        `[POLL] Attempt ${attempt + 1}/${maxRetries} FAILED — ${label}:`,
+        err.message,
+      );
+
+      // Do not retry on errors that retrying cannot fix.
+      if (kind === "auth" || kind === "ratelimit") {
+        console.error(
+          "[POLL] Non-retryable error — aborting retry loop early.",
+        );
+        break;
+      }
+    }
+  }
+
+  throw lastError;
+};
+
+// ---------------------------------------------------------------------------
+// Main poll function
+// ---------------------------------------------------------------------------
+
 const pollFlights = async () => {
   try {
     console.log("[POLL] Starting flight poll cycle...");
-    console.log("[POLL] Config - URL:", config.openSkyUrl);
+
+    // Resolve the target URL — prepend proxy if configured.
+    const targetUrl = config.openSkyProxyUrl
+      ? `${config.openSkyProxyUrl}${config.openSkyUrl}`
+      : config.openSkyUrl;
+
+    console.log("[POLL] Config - Target URL:", targetUrl);
+    console.log(
+      "[POLL] Config - Proxy active:",
+      !!config.openSkyProxyUrl,
+      config.openSkyProxyUrl ? `(${config.openSkyProxyUrl})` : "",
+    );
     console.log("[POLL] Config - Username set:", !!config.openSkyUsername);
+    console.log("[POLL] Config - Fetch timeout:", config.fetchTimeoutMs, "ms");
+    console.log("[POLL] Config - Max retries:", config.fetchMaxRetries);
     console.log("[POLL] Config - Mock on failure:", config.enableMockOnApiFailure);
 
     const headers = {
@@ -115,23 +241,18 @@ const pollFlights = async () => {
       headers.Authorization = `Basic ${token}`;
       console.log("[POLL] OpenSky credentials configured");
     } else {
-      console.log("[POLL] WARNING: No OpenSky credentials provided!");
+      console.log("[POLL] WARNING: No OpenSky credentials — anonymous rate limits apply");
     }
 
-    console.log("[POLL] Fetching from OpenSky API...");
-    const response = await fetch(config.openSkyUrl, {
-      headers,
-      signal: AbortSignal.timeout(config.fetchTimeoutMs),
-    });
-
-    console.log("[POLL] OpenSky response status:", response.status);
-
-    if (!response.ok) {
-      throw new Error(`OpenSky API failed with ${response.status}`);
-    }
+    console.log("[POLL] Fetching from OpenSky API (with retry)...");
+    const response = await fetchWithRetry(targetUrl, { headers });
 
     const payload = await response.json();
-    console.log("[POLL] Received payload with", payload?.states?.length || 0, "states");
+    console.log(
+      "[POLL] Received payload with",
+      payload?.states?.length || 0,
+      "states",
+    );
 
     const flights = extractActiveFlights(payload?.states || []);
     console.log("[POLL] Extracted", flights.length, "active flights");
@@ -151,22 +272,32 @@ const pollFlights = async () => {
     broadcast(latestSnapshot);
     console.log("[POLL] Poll cycle completed successfully");
   } catch (error) {
-    console.error("[POLL] Error during poll:", error);
-    
-    let errorMessage = error instanceof Error ? error.message : "Unknown error";
-    
-    // Detect specific error types
-    if (errorMessage.includes("Connect Timeout") || errorMessage.includes("ETIMEDOUT")) {
-      console.error("[POLL] ⚠️  NETWORK TIMEOUT - Cannot reach OpenSky API");
-      console.error("[POLL] This usually means:");
-      console.error("[POLL]   1. Railway network blocked outbound connections");
-      console.error("[POLL]   2. DNS resolution failed for opensky-network.org");
-      console.error("[POLL]   3. OpenSky API is unreachable from your region");
+    const { kind, label } = classifyFetchError(error);
+
+    console.error(`[POLL] All fetch attempts exhausted — ${label}`);
+    console.error("[POLL] Final error:", error instanceof Error ? error.message : error);
+
+    // Emit targeted remediation hints based on the failure type.
+    if (kind === "timeout") {
+      console.error("[POLL] ⚠️  TIMEOUT — possible causes:");
+      console.error("[POLL]   • Railway outbound network is blocked or throttled");
+      console.error("[POLL]   • opensky-network.org is unreachable from this region");
+      console.error("[POLL]   • Consider setting OPENSKY_PROXY_URL to route via a proxy");
+      console.error("[POLL]   • Increase FETCH_TIMEOUT_MS (current:", config.fetchTimeoutMs, "ms)");
+    } else if (kind === "dns") {
+      console.error("[POLL] ⚠️  DNS FAILURE — opensky-network.org could not be resolved");
+      console.error("[POLL]   • Check Railway's DNS / outbound connectivity");
+      console.error("[POLL]   • Consider setting OPENSKY_PROXY_URL");
+    } else if (kind === "auth") {
+      console.error("[POLL] ⚠️  AUTH ERROR — check OPENSKY_USERNAME / OPENSKY_PASSWORD");
+    } else if (kind === "ratelimit") {
+      console.error("[POLL] ⚠️  RATE LIMITED — add credentials or reduce POLL_INTERVAL_MS");
+    } else if (kind === "refused" || kind === "reset") {
+      console.error("[POLL] ⚠️  CONNECTION PROBLEM — remote host actively refused/reset");
+      console.error("[POLL]   • Consider setting OPENSKY_PROXY_URL");
     }
-    
-    const isRateLimited =
-      error instanceof Error &&
-      (error.message.includes(" 429") || error.message.includes("429"));
+
+    const isRateLimited = kind === "ratelimit";
 
     if (config.enableMockOnApiFailure) {
       console.log("[POLL] Falling back to mock mode");
@@ -179,14 +310,15 @@ const pollFlights = async () => {
           ? "OpenSky rate limit hit. Streaming backend mock flights for demo mode."
           : "OpenSky unavailable. Streaming backend mock flights for demo mode.",
         error: error instanceof Error ? error.message : "Unknown error",
+        errorKind: kind,
       };
 
       broadcast(latestSnapshot);
-      console.warn("[POLL] Fallback (mock mode):", error);
+      console.warn("[POLL] Fallback (mock mode) active — error kind:", kind);
       return;
     }
 
-    console.log("[POLL] Setting error state - no mock fallback enabled");
+    console.log("[POLL] Setting error state — mock fallback disabled");
     latestSnapshot = {
       type: "flight_update",
       timestamp: new Date().toISOString(),
@@ -196,10 +328,11 @@ const pollFlights = async () => {
         ? "OpenSky rate limit hit. Add OPENSKY_USERNAME and OPENSKY_PASSWORD in backend .env."
         : "Unable to fetch OpenSky data.",
       error: error instanceof Error ? error.message : "Unknown error",
+      errorKind: kind,
     };
 
     broadcast(latestSnapshot);
-    console.error("[POLL] Error state set and broadcasted");
+    console.error("[POLL] Error state set and broadcasted — error kind:", kind);
   }
 };
 
@@ -209,7 +342,11 @@ console.log("Starting flight polling service...");
 console.log("Config loaded:");
 console.log("  - Port:", config.port);
 console.log("  - Poll Interval:", config.pollIntervalMs, "ms");
+console.log("  - Fetch Timeout:", config.fetchTimeoutMs, "ms");
+console.log("  - Max Retries:", config.fetchMaxRetries);
+console.log("  - Retry Base Delay:", config.fetchRetryBaseDelayMs, "ms");
 console.log("  - OpenSky URL:", config.openSkyUrl);
+console.log("  - OpenSky Proxy URL:", config.openSkyProxyUrl || "(none)");
 console.log("  - OpenSky Username configured:", !!config.openSkyUsername);
 console.log("  - Mock on API failure:", config.enableMockOnApiFailure);
 console.log("========================================\n");
