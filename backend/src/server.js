@@ -34,6 +34,17 @@ const broadcast = (payload) => {
   }
 };
 
+app.get("/", (_req, res) => {
+  res.json({
+    message: "Real-Time Flight Tracker Backend",
+    endpoints: {
+      health: "/health",
+      latest: "/latest",
+      websocket: "ws://this-url",
+    },
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
