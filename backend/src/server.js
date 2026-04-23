@@ -121,6 +121,7 @@ const pollFlights = async () => {
     console.log("[POLL] Fetching from OpenSky API...");
     const response = await fetch(config.openSkyUrl, {
       headers,
+      signal: AbortSignal.timeout(config.fetchTimeoutMs),
     });
 
     console.log("[POLL] OpenSky response status:", response.status);
@@ -151,6 +152,18 @@ const pollFlights = async () => {
     console.log("[POLL] Poll cycle completed successfully");
   } catch (error) {
     console.error("[POLL] Error during poll:", error);
+    
+    let errorMessage = error instanceof Error ? error.message : "Unknown error";
+    
+    // Detect specific error types
+    if (errorMessage.includes("Connect Timeout") || errorMessage.includes("ETIMEDOUT")) {
+      console.error("[POLL] ⚠️  NETWORK TIMEOUT - Cannot reach OpenSky API");
+      console.error("[POLL] This usually means:");
+      console.error("[POLL]   1. Railway network blocked outbound connections");
+      console.error("[POLL]   2. DNS resolution failed for opensky-network.org");
+      console.error("[POLL]   3. OpenSky API is unreachable from your region");
+    }
+    
     const isRateLimited =
       error instanceof Error &&
       (error.message.includes(" 429") || error.message.includes("429"));

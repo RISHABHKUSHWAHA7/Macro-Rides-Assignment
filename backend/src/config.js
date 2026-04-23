@@ -28,6 +28,7 @@ try {
 export const config = {
   port,
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 10000),
+  fetchTimeoutMs: Number(process.env.FETCH_TIMEOUT_MS || 30000), // 30 seconds for Railway
   openSkyUrl:
     process.env.OPENSKY_URL ||
     "https://opensky-network.org/api/states/all?lamin=8.0&lomin=68.0&lamax=37.0&lomax=97.0",
