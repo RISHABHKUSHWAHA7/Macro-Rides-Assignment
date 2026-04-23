@@ -15,10 +15,12 @@ import { INITIAL_REGION, WS_URL } from "./src/config";
 import { formatMeters, formatSpeed, trendLabel } from "./src/utils";
 
 const RECONNECT_DELAY_MS = 3000;
+const POLL_INTERVAL_MS = 10000; // Backend polls every 10 seconds
 
 export default function App() {
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
+  const countdownTimerRef = useRef(null);
   const markerRegionsRef = useRef(new Map());
 
   const [flights, setFlights] = useState([]);
@@ -27,6 +29,8 @@ export default function App() {
   const [serverMessage, setServerMessage] = useState(
     "Connecting to backend...",
   );
+  const [lastUpdateTime, setLastUpdateTime] = useState(null);
+  const [nextUpdateIn, setNextUpdateIn] = useState(POLL_INTERVAL_MS / 1000);
 
   const connect = () => {
     if (wsRef.current) {
@@ -48,6 +52,10 @@ export default function App() {
         if (payload.type !== "flight_update") {
           return;
         }
+
+        // Update timestamp for timer
+        setLastUpdateTime(new Date());
+        setNextUpdateIn(Math.ceil(POLL_INTERVAL_MS / 1000));
 
         setServerStatus(payload.status || "unknown");
         setServerMessage(payload.message || "");
@@ -112,6 +120,23 @@ export default function App() {
     };
   }, []);
 
+  // Timer to show countdown to next update
+  useEffect(() => {
+    countdownTimerRef.current = setInterval(() => {
+      if (lastUpdateTime) {
+        const now = new Date();
+        const elapsedMs = now - lastUpdateTime;
+        const remainingMs = POLL_INTERVAL_MS - (elapsedMs % POLL_INTERVAL_MS);
+        const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+        setNextUpdateIn(remainingSeconds);
+      }
+    }, 100); // Update every 100ms for smooth countdown
+
+    return () => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  }, [lastUpdateTime]);
+
   const statusText = useMemo(() => {
     if (connectionState === "connecting") return "Connecting to server...";
     if (connectionState === "disconnected")
@@ -124,12 +149,20 @@ export default function App() {
     return serverMessage || "Live tracking";
   }, [connectionState, serverStatus, serverMessage]);
 
+  const timerText = useMemo(() => {
+    if (connectionState !== "connected" || !lastUpdateTime) {
+      return "";
+    }
+    return `Next update in ${nextUpdateIn}s`;
+  }, [connectionState, lastUpdateTime, nextUpdateIn]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.title}>India Flight Tracker</Text>
         <Text style={styles.subtitle}>{statusText}</Text>
+        {timerText && <Text style={styles.timerText}>{timerText}</Text>}
       </View>
 
       <MapView style={styles.map} initialRegion={INITIAL_REGION}>
@@ -191,7 +224,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === "android" ? 14 : 4,
+    paddingTop: Platform.OS === "android" ? 40 : 4,
     paddingBottom: 10,
     backgroundColor: "#0e141b",
   },
@@ -199,11 +232,21 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "700",
     color: "#f8fafc",
+    textAlign: "center",
   },
   subtitle: {
     marginTop: 6,
     fontSize: 13,
     color: "#98a3b3",
+    textAlign: "center",
+  },
+  timerText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64d9ff",
+    textAlign: "center",
+    letterSpacing: 0.5,
   },
   map: {
     flex: 1,
@@ -236,7 +279,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   card: {
-    backgroundColor: "#172534",
+    backgroundColor: "#172a34",
     borderRadius: 14,
     padding: 12,
     marginBottom: 10,
@@ -246,10 +289,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#eef4fa",
     marginBottom: 8,
+    textAlign: "center",
   },
   meta: {
     fontSize: 14,
     color: "#b8c7d9",
     marginBottom: 3,
+    textAlign: "center",
   },
 });
